@@ -33,44 +33,118 @@ function drawGrid() {
 
 new ResizeObserver(drawGrid).observe(stage);
 if (stage.classList.contains('hero')) {
-  stage.addEventListener('pointermove', event => {
-    if (reduced.matches || event.pointerType === 'touch') return;
-    const bounds = stage.getBoundingClientRect();
-    const x = (event.clientX - bounds.left) / bounds.width;
-    const y = (event.clientY - bounds.top) / bounds.height;
-    stage.style.setProperty('--yaw', (x - .5) * 52 + 'deg');
-    stage.style.setProperty('--pitch', (.5 - y) * 40 + 'deg');
-    stage.style.setProperty('--shift-x', (x - .5) * 96 + 'px');
-    stage.style.setProperty('--shift-y', (y - .5) * 76 + 'px');
-    stage.style.setProperty('--light-x', x * 100 + '%');
-    stage.style.setProperty('--light-y', y * 100 + '%');
-  });
+  const tilt = document.querySelector('.hero-tilt');
+  const limit = value => Math.max(-1, Math.min(1, value));
+  let origin;
+  let scrollFrame;
+  const set = (property, value, unit) => stage.style.setProperty(property, value + unit);
 
-  function resetPointer() {
-    for (const property of ['--yaw', '--pitch', '--shift-x', '--shift-y', '--light-x', '--light-y']) {
-      stage.style.removeProperty(property);
+  function move(x, y) {
+    set('--yaw', x * 36, 'deg');
+    set('--pitch', -y * 29, 'deg');
+    set('--shift-x', x * 74, 'px');
+    set('--shift-y', y * 54, 'px');
+    set('--light-x', 50 + x * 50, '%');
+    set('--light-y', 50 + y * 50, '%');
+  }
+
+  function orientation(event) {
+    if (reduced.matches || !Number.isFinite(event.beta) || !Number.isFinite(event.gamma)) return;
+    origin ||= { beta: event.beta, gamma: event.gamma };
+    move(limit((event.gamma - origin.gamma) / 22), limit((event.beta - origin.beta) / 22));
+  }
+
+  function stopTilt() {
+    window.removeEventListener('deviceorientation', orientation);
+    tilt.setAttribute('aria-pressed', 'false');
+    origin = undefined;
+    move(0, 0);
+  }
+
+  function scrollMotion() {
+    scrollFrame = undefined;
+    const { top, height } = stage.getBoundingClientRect();
+    set('--scroll-shift', reduced.matches ? 0 : Math.max(0, Math.min(1, -top / height)) * 155, 'px');
+  }
+
+  stage.addEventListener('pointermove', event => {
+    if (reduced.matches || event.pointerType === 'touch' || origin) return;
+    const bounds = stage.getBoundingClientRect();
+    move(limit(2 * (event.clientX - bounds.left) / bounds.width - 1),
+      limit(2 * (event.clientY - bounds.top) / bounds.height - 1));
+  });
+  stage.addEventListener('pointerleave', () => { if (!origin) move(0, 0); });
+  window.addEventListener('scroll', () => {
+    if (scrollFrame === undefined) scrollFrame = requestAnimationFrame(scrollMotion);
+  }, { passive: true });
+  scrollMotion();
+
+  function updateTilt() {
+    tilt.hidden = reduced.matches || !window.DeviceOrientationEvent || !matchMedia('(pointer: coarse)').matches;
+    if (tilt.hidden) stopTilt();
+    scrollMotion();
+  }
+  tilt.addEventListener('click', async () => {
+    if (tilt.getAttribute('aria-pressed') === 'true') {
+      stopTilt();
+      return;
+    }
+    try {
+      const request = window.DeviceOrientationEvent.requestPermission;
+      if (request && await window.DeviceOrientationEvent.requestPermission() !== 'granted') return;
+      if (reduced.matches) return;
+      window.addEventListener('deviceorientation', orientation);
+      tilt.setAttribute('aria-pressed', 'true');
+    } catch {
+      stopTilt();
+    }
+  });
+  reduced.addEventListener('change', updateTilt);
+  updateTilt();
+}
+
+const pageMenu = document.querySelector('.home-pages');
+if (pageMenu) {
+  const nav = pageMenu.querySelector('nav');
+  const links = [...nav.querySelectorAll('a')];
+  const currentLink = document.createElement('a');
+  const previous = document.createElement('button');
+  const next = document.createElement('button');
+  const pause = document.createElement('button');
+  let index = 0;
+  let paused = false;
+
+  function show(offset = 0) {
+    index = (index + offset + links.length) % links.length;
+    previous.textContent = links[(index + links.length - 1) % links.length].textContent;
+    next.textContent = links[(index + 1) % links.length].textContent;
+    currentLink.textContent = links[index].textContent;
+    currentLink.href = links[index].getAttribute('href');
+    if (offset && !reduced.matches) {
+      currentLink.animate([{opacity: .5, transform: `translateX(${offset * 12}px)`}, {opacity: 1, transform: 'none'}], 220);
     }
   }
 
-  stage.addEventListener('pointerleave', resetPointer);
-  reduced.addEventListener('change', resetPointer);
-}
-
-const titleLight = document.querySelector('.title-light');
-if (titleLight) {
-  let sweep;
-  titleLight.addEventListener('pointermove', event => {
-    if (reduced.matches || event.pointerType === 'touch') return;
-    const bounds = titleLight.getBoundingClientRect();
-    titleLight.style.setProperty('--title-light-x', `${(event.clientX - bounds.left) / bounds.width * 100}%`);
+  for (const [button, label, offset] of [[previous, 'Previous page', -1], [next, 'Next page', 1]]) {
+    button.type = 'button';
+    button.setAttribute('aria-label', label);
+    button.addEventListener('click', () => show(offset));
+  }
+  pause.type = 'button';
+  pause.className = 'carousel-playback';
+  function updatePlayback() {
+    pause.textContent = paused ? '▶' : '❚❚';
+    pause.setAttribute('aria-label', paused ? 'Play page carousel' : 'Pause page carousel');
+  }
+  updatePlayback();
+  pause.addEventListener('click', () => {
+    paused = !paused;
+    updatePlayback();
   });
-  titleLight.addEventListener('pointerleave', () => titleLight.style.removeProperty('--title-light-x'));
-  titleLight.addEventListener('click', () => {
-    sweep?.cancel();
-    if (reduced.matches) return;
-    sweep = titleLight.animate([
-      { '--title-light-x': '-25%' },
-      { '--title-light-x': '125%' },
-    ], { duration: 950, easing: 'ease-in-out' });
-  });
+  nav.replaceChildren(previous, currentLink, next, pause);
+  nav.classList.add('page-carousel');
+  show();
+  setInterval(() => {
+    if (!paused && !reduced.matches && !nav.matches(':hover, :focus-within')) show(1);
+  }, 3000);
 }

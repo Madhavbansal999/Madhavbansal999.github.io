@@ -7,8 +7,8 @@
   cards.forEach((card, index) => {
     card.querySelector('a').addEventListener('click', event => {
       event.preventDefault();
-      const photo = new Blob([Uint8Array.from(atob(sources[index].split(',')[1]), byte => byte.charCodeAt(0))], { type: 'image/jpeg' });
-      const url = URL.createObjectURL(photo);
+      const bytes = Uint8Array.from(atob(sources[index].split(',')[1]), c => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], {type:'image/jpeg'}));
       window.open(url, '_blank', 'noopener');
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     });
@@ -42,7 +42,6 @@
       card.style.transform = `translateX(${offset * spacing}px)`;
       card.classList.toggle('is-neighbor', distance > 0);
       card.style.zIndex = String(100 - Math.round(distance * 30));
-      card.querySelector('a').href = sources[index];
       card.querySelector('a').tabIndex = index === current ? 0 : -1;
     });
     if (current !== previous && !preference.matches) {
